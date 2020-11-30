@@ -44,7 +44,7 @@ class LieConvSimple(PointConv):
     def extract_conv_args(self,algebra_orbits1,algebra_orbits2):
         """ inputs: [aq1 (bs,n,d), aq2 (bs,n,d)] outputs: a12q1q2 (bs,n,n,d2)"""
         ## assuming group is T for now to speed things up, otherwise equivalent
-        return algebra_orbits1[:,:,None,:]-algebra_orbits1[:,None,:,:]
+        return algebra_orbits1[:,:,None,:]-algebra_orbits2[:,None,:,:]
         a1 = algebra_orbits1[...,:self.group.lie_dim]
         q1 = algebra_orbits1[...,self.group.lie_dim:]
         a2 = algebra_orbits2[...,:self.group.lie_dim]
