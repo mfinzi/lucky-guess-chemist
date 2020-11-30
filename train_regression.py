@@ -7,7 +7,8 @@ from oil.tuning.study import train_trial
 from oil.utils.parallel import try_multigpu_parallelize
 from lie_conv.datasets import QM9datasets
 from corm_data.collate import collate_fn
-from trainer import MolecLieResNet, MoleculeTrainer
+from lie_conv.moleculeTrainer import MoleculeTrainer
+from lucky_guess import MolecLieResNet
 from oil.datasetup.datasets import split_dataset
 import lie_conv.lieGroups as lieGroups
 import functools

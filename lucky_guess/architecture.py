@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from model import LieConvSimple,simple_lift
+from lucky_guess.lieconv_layers import LieConvSimple,simple_lift
 from oil.model_trainers import Trainer
 from lie_conv.lieConv import PointConv, Pass, Swish, GlobalPool
 from lie_conv.lieConv import norm, LieResNet, BottleBlock
@@ -12,43 +12,6 @@ from lie_conv.utils import FarthestSubsample, knn_point, index_points
 from lie_conv.lieGroups import T,SO2,SO3,SE2,SE3, norm
 from lie_conv.masked_batchnorm import MaskBatchNormNd
 import numpy as np
-
-
-@export
-class MoleculeTrainer(Trainer):
-    def __init__(self, *args, task='cv', ds_stats=None, **kwargs):
-        super().__init__(*args,**kwargs)
-        self.hypers['task'] = task
-        self.ds_stats = ds_stats
-        if hasattr(self.lr_schedulers[0],'setup_metrics'): #setup lr_plateau if exists
-            self.lr_schedulers[0].setup_metrics(self.logger,'valid_MAE')
-            
-    def loss(self, minibatch):
-        y = self.model(minibatch)
-        target = minibatch[self.hypers['task']]
-
-        if self.ds_stats is not None:
-            median, mad = self.ds_stats
-            target = (target - median) / mad
-
-        return (y-target).abs().mean()
-
-    def metrics(self, loader):
-        task = self.hypers['task']
-
-        #mse = lambda mb: ((self.model(mb)-mb[task])**2).mean().cpu().data.numpy()
-        if self.ds_stats is not None:
-            median, mad = self.ds_stats
-            def mae(mb):
-                target = mb[task]
-                y = self.model(mb) * mad + median
-                return (y-target).abs().mean().cpu().data.numpy()
-        else:
-            mae = lambda mb: (self.model(mb)-mb[task]).abs().mean().cpu().data.numpy()
-        return {'MAE': self.evalAverageMetrics(loader,mae)}
-    
-    def logStuff(self,step,minibatch=None):
-        super().logStuff(step,minibatch)                            
 
 @export
 class LieResNet(nn.Module,metaclass=Named):

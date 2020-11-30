@@ -54,7 +54,7 @@ class LieConvSimple(PointConv):
         bq2 = q2[:,None,:,:].repeat(1,a1.shape[1],1,1)
         return torch.cat([a12,bq1,bq2],dim=-1)
 
-    def extract_neighborhood(self,inp,query_aq):
+    def extract_neighborhood(self,inp,query_aq,dependency_mask=None):
         """ inputs: [aq (bs,n,d), inp_vals (bs,n,c), mask (bs,n), query_indices (bs,m)]
             outputs: [neighbor_abq (bs,m,mc_samples,d), neighbor_vals (bs,m,mc_samples,c)]"""
 
@@ -63,11 +63,12 @@ class LieConvSimple(PointConv):
         abq_at_query = self.extract_conv_args(aq,query_aq)
         
         # Determine ids (and mask) for points sampled within neighborhood (A4)
-        dists = self.group.distance(abq_at_query) #(bs,m,n,d) -> (bs,m,n)
+        dists = self.group.distance(abq_at_query) #(bs,m,n,d) -> (bs,m,n) (input, output)
         dists = torch.where(mask[:,None,:].expand(*dists.shape),dists,1e8*torch.ones_like(dists))
         k = min(self.mc_samples,inp_vals.shape[1])
         bs,m,n = dists.shape
-        within_ball = (dists < self.r)&mask[:,None,:]&mask[:,:,None] # (bs,m,n)
+        dependency_mask = mask[:,None,:]&mask[:,:,None] if dependency_mask is None else dependency_mask
+        within_ball = (dists < self.r)&dependency_mask # (bs,m,n)
         B = torch.arange(bs)[:,None,None]
         M = torch.arange(m)[None,:,None]
         noise = torch.zeros(bs,m,n,device=within_ball.device)
@@ -116,3 +117,15 @@ class LieConvSimple(PointConv):
         convolved_vals = self.point_convolve(nbhd_abq, nbhd_vals, nbhd_mask)
         convolved_wzeros = torch.where(mask.unsqueeze(-1),convolved_vals,torch.zeros_like(convolved_vals))
         return query_aq, convolved_wzeros, mask
+
+
+class LieConvAutoregressive(LieConvSimple):
+    """ LieConv but with autoregressive (causal) masking. """
+    def extract_neighborhood(self,inp,query_aq):
+        """ inputs: [aq (bs,n,d), inp_vals (bs,n,c), mask (bs,n), query_indices (bs,m)]
+            outputs: [neighbor_abq (bs,m,mc_samples,d), neighbor_vals (bs,m,mc_samples,c)]"""
+        # Subsample pairs_ab, inp_vals, mask to the query_indices
+        aq, inp_vals, mask = inp
+        causal_mask = torch.triu(mask[:,None,:]&mask[:,:,None],diagonal=1).permute(0,2,1) #(bs,n,n)
+        return super().extract_neighborhood(inp,query_aq,causal_mask)
+
