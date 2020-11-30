@@ -93,10 +93,12 @@ class LieConvSimple(PointConv):
         if self.mean: convolved_vals /= nbhd_mask.sum(-1,keepdim=True).clamp(min=1) # Divide by num points
         return convolved_vals
 
-    def forward(self, inp):
-        """inputs: [pairs_abq (bs,n,n,d)], [inp_vals (bs,n,ci)]), [query_indices (bs,m)]
-           outputs [subsampled_abq (bs,m,m,d)], [convolved_vals (bs,m,co)]"""
-        nbhd_abq, nbhd_vals, nbhd_mask = self.extract_neighborhood(inp, query_indices)
+    def forward(self, inp, query_aq=None):
+        """inputs: ([pairs_abq (bs,n,n,d)], [inp_vals (bs,n,ci)]), [query_indices (bs,m)]
+           outputs [abq (bs,m,m,d)], [convolved_vals (bs,m,co)]"""
+        aq,vals,mask = inp
+        query_aq = aq if query_aq is None else query_aq
+        nbhd_abq, nbhd_vals, nbhd_mask = self.extract_neighborhood(inp, query_aq)
         convolved_vals = self.point_convolve(nbhd_abq, nbhd_vals, nbhd_mask)
-        convolved_wzeros = torch.where(sub_mask.unsqueeze(-1),convolved_vals,torch.zeros_like(convolved_vals))
-        return sub_abq, convolved_wzeros, sub_mask
+        convolved_wzeros = torch.where(mask.unsqueeze(-1),convolved_vals,torch.zeros_like(convolved_vals))
+        return query_aq, convolved_wzeros, mask
