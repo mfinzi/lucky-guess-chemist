@@ -19,7 +19,17 @@ def simple_lift(self,inp,nsamples,**kwargs):
     expanded_aq = torch.cat([expanded_a,expanded_q],dim=-1) if expanded_q is not None else expanded_a
     return (expanded_aq,expanded_v,expanded_mask)
 
-LieGroup.lift = types.MethodType(simple_lift,LieGroup)
+def Texp(self,b):
+    A = torch.zeros(*b.shape[:-1],4,4,device=b.device,dtype=b.dtype)+torch.eye(4,dtype=b.dtype,device=b.device)
+    A[...,:3,3]=b
+    return A
+    
+def Tlog(self,A):
+    return A[...,:3,3]
+
+T.exp = types.MethodType(Texp,T)
+T.log = types.MethodType(Tlog,T)
+#LieGroup.lift = types.MethodType(simple_lift,LieGroup)
 
 class LieConvSimple(PointConv):
     def __init__(self,*args,group=T(3),ds_frac=1,fill=1/3,**kwargs):
@@ -37,8 +47,10 @@ class LieConvSimple(PointConv):
         q1 = algebra_orbits1[...,self.group.lie_dim:]
         a2 = algebra_orbits2[...,:self.group.lie_dim]
         q2 = algebra_orbits2[...,self.group.lie_dim:]
-        a12 = self.group.log(self.group.exp(-a1).unsqueeze(-4)@self.group.exp(a2).unsqueeze(-3)) # check ordering and signs
-        return torch.cat([a12,q1,q2],dim=-1)
+        a12 = self.group.log(self.group.exp(-a1).unsqueeze(-3)@self.group.exp(a2).unsqueeze(-4)) # check ordering and signs
+        bq1 = q1[:,:,None,:].repeat(1,1,a2.shape[1],1) #broadcasted to shape of a12
+        bq2 = q2[:,None,:,:].repeat(1,a1.shape[1],1,1)
+        return torch.cat([a12,bq1,bq2],dim=-1)
 
     def extract_neighborhood(self,inp,query_aq):
         """ inputs: [aq (bs,n,d), inp_vals (bs,n,c), mask (bs,n), query_indices (bs,m)]
