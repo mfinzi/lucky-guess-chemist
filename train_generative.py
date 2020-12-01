@@ -5,14 +5,14 @@ from oil.utils.utils import LoaderTo, islice, cosLr, FixedNumpySeed
 from oil.tuning.args import argupdated_config
 from oil.tuning.study import train_trial
 from oil.utils.parallel import try_multigpu_parallelize
-from lie_conv.datasets import QM9datasets
+from lucky_guess.datasets import QM9datasets
 from corm_data.collate import collate_fn
-from lucky_guess import SeqMolec, AutoregressiveMoleculeTrainer
+from lucky_guess import SeqMolec,SeqMolecOct, AutoregressiveMoleculeTrainer
 from oil.datasetup.datasets import split_dataset
 import lie_conv.lieGroups as lieGroups
 import functools
 import copy
-
+import lucky_guess.architecture as models
 
 def makeTrainer(*, device='cuda', lr=3e-3, bs=75, num_epochs=500,network=SeqMolec, 
                 net_config={'k':1536,'nbhd':100,'group':lieGroups.T(3),'aug':True,'num_layers':6},
@@ -42,7 +42,7 @@ if __name__=='__main__':
     defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
     #defaults['trainer_config']['early_stop_metric']='valid_MAE'
     defaults['save']=False
-    print(Trial(argupdated_config(defaults,namespace=lieGroups)))
+    print(Trial(argupdated_config(defaults,namespace=(lieGroups,models))))
 
     # thestudy = Study(simpleTrial,argupdated_config(config_spec,namespace=__init__),
     #                 study_name="point2d",base_log_dir=log_dir)

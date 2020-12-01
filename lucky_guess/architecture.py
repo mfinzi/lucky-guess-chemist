@@ -113,6 +113,7 @@ class SeqMolec(nn.Module,metaclass=Named):
         self.liftsamples = liftsamples
         self.group = group
         self.k=k
+        self._sigma = nn.Parameter(torch.tensor(0.))
 
     def featurize(self, mb):
         atomic_coords = mb['positions'].float()
@@ -139,14 +140,84 @@ class SeqMolec(nn.Module,metaclass=Named):
         logits,feats = torch.split(feats_out,[self.NUM_SPECIES,self.k],-1)
         logits_wstart  = torch.roll(logits,1,1)
         atom_index = atom_in.reshape(-1,self.NUM_SPECIES).max(dim=1)[1]
-        NLLs = F.cross_entropy(logits_wstart.reshape(-1,self.NUM_SPECIES),atom_index,reduction='none')
-        NLL_sum = (NLLs*mask_in.reshape(-1)).sum()
+        atom_NLLs = F.cross_entropy(logits_wstart.reshape(-1,self.NUM_SPECIES),atom_index,reduction='none')
+        atom_NLL = (atom_NLLs*mask_in.reshape(-1)).sum()/bs #TODO: don't mask out end token?
         head_input = (xyz_out,torch.cat([atom_in,torch.roll(feats,1,1)],dim=-1),mask_out)
         _,xyz_pred,mask_out = self.position_head(head_input)
-        return (((xyz_pred-xyz_in)**2).sum()/2+NLL_sum)/bs
+        sigma2 =F.softplus(self._sigma)**2
+        D = 3*mask_in.reshape(-1).sum()
+        pos_NLL = ((((xyz_pred-xyz_in)*mask_in[:,:,None])**2).sum()/(2*sigma2)+D*(2*np.pi*sigma2).log()/2)/bs
+        return atom_NLL+pos_NLL
         
     def forward(self,x):
         with torch.no_grad():
             #x = self.random_rotate(x) if self.aug else x
             lifted_x = simple_lift(self.group,x,self.liftsamples)
         return self.body(lifted_x)
+
+def get_oct_bins(xyz,precision=1/2**4):
+    """ Computes the oct binning of the coordinates up to given precision
+        [xyz (*,3)], [precision int] -> [xyz_oct (log2(1/p),*)]"""
+    nbits = np.rint(-np.log2(precision))
+    #print(xyz[xyz!=0]*2**nbits)
+    xyz_rounded = np.rint(xyz.cpu().data.numpy()*2**nbits).astype(np.uint8)
+    #print(xyz_rounded,xyz_rounded.astype(np.uint8))
+    xyz_bits = np.unpackbits(xyz_rounded,axis=0)
+    xyz_oct = xyz_bits[...,0]+xyz_bits[...,1]*2+xyz_bits[...,2]*4
+    return xyz_oct
+
+
+class GRUautoregressor(nn.Module):
+    def __init__(self,classes,hidden_units):
+        super().__init__()
+        self.classes=classes
+        self.in_embedding = nn.Embedding(classes+1,hidden_units)
+        self.gru = nn.GRU(hidden_units,hidden_units)
+        self.out_embedding = nn.Linear(hidden_units,classes)
+    def forward(self,X,h0):
+        """ [X (N,bs)], [h0 (bs,k)] -> [X_logp (N,bs,classes)] """
+        out = self.in_embedding(X)
+        Y,hf = self.gru(out,h0[None])
+        X_out_logits = self.out_embedding(Y)
+        X_logp = F.log_softmax(X_out_logits,dim=-1)
+        return X_logp
+
+@export
+class SeqMolecOct(SeqMolec):
+    def __init__(self,*args,precision=1/128,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.position_head = nn.Sequential(
+            MaskBatchNormNd(self.k+self.NUM_SPECIES),
+            Pass(Swish(),dim=1),
+            Pass(nn.Linear(self.k+self.NUM_SPECIES,self.k),dim=1),
+        )
+        self.oct_GRU = GRUautoregressor(8+1,self.k)
+        self.precision=precision
+    def NLL(self,mb):
+        with torch.no_grad():
+            x = self.featurize(mb)
+        xyz_in,atom_in,mask_in = x
+        bs,n,d = xyz_in.shape
+        xyz_out,feats_out,mask_out = self.forward(x)
+        logits,feats = torch.split(feats_out,[self.NUM_SPECIES,self.k],-1)
+        logits_wstart  = torch.roll(logits,1,1)
+        atom_index = atom_in.reshape(-1,self.NUM_SPECIES).max(dim=1)[1]
+        atom_NLLs = F.cross_entropy(logits_wstart.reshape(-1,self.NUM_SPECIES),atom_index,reduction='none')
+        atom_NLL = (atom_NLLs*mask_in.reshape(-1)).sum()/bs
+
+        head_input = (xyz_out,torch.cat([atom_in,torch.roll(feats,1,1)],dim=-1),mask_out)
+        _,head_output,_ = self.position_head(head_input)
+        oct_sequence = torch.from_numpy(get_oct_bins(xyz_in,self.precision).reshape(-1,bs*n)).long().to(xyz_in.device)
+        oct_sequence_wstart = torch.cat([9*torch.ones(1,bs*n,device=xyz_in.device).long(),oct_sequence],dim=0)
+
+        Xlogp = self.oct_GRU(oct_sequence_wstart,head_output.reshape(bs*n,self.k))
+        pos_nlls = F.nll_loss(Xlogp[:-1].reshape(-1,9),oct_sequence.reshape(-1),reduction='none') #(p*bs*n)
+        pos_NLL = (pos_nlls.reshape(*oct_sequence.shape)*mask_in.reshape(-1)).sum()/bs
+        cube_vol = self.precision**3 #TODO: fix nearest power of 2 rounding
+        cube_NLL = np.log(cube_vol)**mask_in.reshape(-1).sum()/float(bs)
+        return atom_NLL+pos_NLL+cube_NLL
+
+
+
+
+
