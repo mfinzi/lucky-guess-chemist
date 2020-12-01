@@ -13,9 +13,9 @@ class AutoregressiveMoleculeTrainer(Trainer):
     def loss(self, mb):
         return self.model.NLL(mb)
 
-    # def metrics(self, loader):
-    #     mae = lambda mb: (self.model(mb)-mb[task]).abs().mean().cpu().data.numpy()
-    #     return {'MAE': self.evalAverageMetrics(loader,mae)}
+    def metrics(self, loader):
+        nll = lambda mb: self.model.NLL(mb).cpu().data.numpy()
+        return {'NLL': self.evalAverageMetrics(loader,nll)}
     
     # def logStuff(self,step,minibatch=None):
     #     super().logStuff(step,minibatch)                            
