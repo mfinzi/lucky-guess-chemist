@@ -15,7 +15,7 @@ import copy
 import lucky_guess.architecture as models
 
 def makeTrainer(*, device='cuda', lr=3e-3, bs=75, num_epochs=500,network=SeqMolec, 
-                net_config={'k':1536,'nbhd':100,'group':lieGroups.T(3),'aug':True,'num_layers':6},
+                net_config={'k':1536,'nbhd':100,'group':lieGroups.T(3),'aug':True,'num_layers':4},
                 subsample=False, trainer_config={'log_dir':None,'log_suffix':''}):#,'log_args':{'timeFrac':1/4,'minPeriod':0}}):
     # Create Training set and model
     device = torch.device(device)
